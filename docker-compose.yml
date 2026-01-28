@@ -1,0 +1,89 @@
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: docker/airflow/Dockerfile
+  env_file:
+    - .env
+  environment:
+    # Core Airflow settings
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+
+    # Airflow metadata DB (separate database inside the same Postgres container)
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: >-
+      postgresql+psycopg2://${POSTGRES_USER:-ledgerline}:${POSTGRES_PASSWORD:-ledgerline}@postgres:5432/${AIRFLOW_DB:-airflow}
+
+    # Secrets (must be set in .env for real)
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY}
+
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/logs:/opt/airflow/logs
+    - ./airflow/plugins:/opt/airflow/plugins
+    # Required for DockerOperator (Airflow will start dbt/soda containers)
+    - /var/run/docker.sock:/var/run/docker.sock
+  depends_on:
+    - postgres
+  networks:
+    - ledgerline
+
+services:
+  postgres:
+    image: postgres:16
+    env_file:
+      - .env
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ledgerline}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ledgerline}
+      # This is the initial DB created on first boot
+      POSTGRES_DB: ${POSTGRES_DB:-ledgerline}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Create the airflow metadata DB on first boot
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d
+    networks:
+      - ledgerline
+
+  airflow-webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "${AIRFLOW_PORT:-8080}:8080"
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: scheduler
+  
+  airflow-init:
+      <<: *airflow-common
+      command: bash -lc "airflow db migrate && airflow users create --username ${AIRFLOW_ADMIN_USER:-admin} --password ${AIRFLOW_ADMIN_PASSWORD:-admin} --firstname Admin --lastname User --role Admin --email ${AIRFLOW_ADMIN_EMAIL:-admin@example.com}"
+      restart: "no"
+
+  # Images built for DockerOperator to run (not started by default)
+  dbt:
+    build:
+      context: .
+      dockerfile: docker/dbt/Dockerfile
+    image: ledgerline-dbt:1.8.2
+    profiles: ["tools"]
+    networks:
+      - ledgerline
+
+  soda:
+    build:
+      context: .
+      dockerfile: docker/soda/Dockerfile
+    image: ledgerline-soda:3.3.17
+    profiles: ["tools"]
+    networks:
+      - ledgerline
+
+volumes:
+  pgdata:
+
+networks:
+  ledgerline:
+    name: ledgerline

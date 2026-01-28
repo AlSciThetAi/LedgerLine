@@ -1,0 +1,12 @@
+ledgerline:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: postgres
+      user: ledgerline
+      password: ledgerline
+      port: 5432
+      dbname: ledgerline
+      schema: analytics
+      threads: 4

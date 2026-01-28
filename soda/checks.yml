@@ -1,0 +1,5 @@
+checks for stg_financials__income_statement:
+  - row_count > 0
+  - missing_count(entity_ticker) = 0
+  - missing_count(period_end_date) = 0
+  - duplicate_count(entity_ticker, period_end_date, line_item) = 0
